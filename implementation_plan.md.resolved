@@ -1,0 +1,39 @@
+# Agentic Cybersecurity War Room - Implementation Plan
+
+## Goal
+Build a prototype of an Agentic Cybersecurity War Room system using Python, featuring 6 autonomous agents communicating via Kafka and logging to SQLite, using structured JSON messages.
+
+## Proposed Project Structure (d:\Projects\Dev-Hack\cyber-war-room)
+```
+cyber-war-room/
+├── shared/
+│   ├── __init__.py
+│   ├── models.py         # Defines the base JSON structure for agent communication
+│   └── kafka_utils.py    # Helper functions for Kafka consumers/producers
+├── agents/
+│   ├── __init__.py
+│   ├── monitoring.py     # Detects anomalies
+│   ├── threat_intel.py   # Maps anomalies to threats
+│   ├── risk_assessment.py# Calculates risk scores
+│   ├── response.py       # Determines containment actions
+│   ├── forensic.py       # Logs all events to SQLite
+│   └── learning.py       # Analyzes incidents
+├── simulate_attack.py    # Generates test data
+├── requirements.txt      # Python dependencies
+└── README.md             # Instructions to setup and run
+```
+
+## Agent Details
+1. **Monitoring Agent**: Consumes `network-logs`, detects abnormal logins (>5/min) or traffic spikes (>1000 requests), publishes to `monitoring-events`.
+2. **Threat Intelligence Agent**: Consumes `monitoring-events`, maps to DDoS/Brute Force/Privilege Escalation/Malware, publishes to `threat-events`.
+3. **Risk Assessment Agent**: Consumes `threat-events`, computes risk_score (0-100), publishes to `risk-events`.
+4. **Response & Containment Agent**: Consumes `risk-events`, decides action (isolate_host, block_ip, monitor) based on risk threshold, publishes to `response-events`.
+5. **Forensic Logging Agent**: Consumes from all the above event topics and writes fields (event_id, agent_name, timestamp, details) to a local SQLite database (`forensics.db`).
+6. **Learning & Adaptation Agent**: Consumes `response-events`, analyzes outcomes, updates thresholds.
+
+## Verification Plan
+1. Stand up Apache Kafka and Zookeeper (instructions provided).
+2. Install Python dependencies (`kafka-python`).
+3. Run each agent script in a separate terminal.
+4. Execute `simulate_attack.py` to inject Normal, Brute Force, DDoS, and Malware traffic.
+5. Verify that appropriate messages stream through the topics and the forensic SQLite database captures the end-to-end flow.
