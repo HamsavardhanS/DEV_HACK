@@ -139,3 +139,13 @@ export const fetchAIAnalysis = async () => {
         return [];
     }
 };
+
+export const fetchGeoThreats = async () => {
+    try {
+        const res = await api.get('/geo-threats');
+        return res.data;
+    } catch (error) {
+        console.error("Backend geo-threats unavailable");
+        return { geoThreats: [] };
+    }
+};
