@@ -12,7 +12,8 @@ import SecurityScoreGauge from '../components/SecurityScoreGauge';
 import ThreatHeatmap from '../components/ThreatHeatmap';
 import LiveEventStream from '../components/LiveEventStream';
 import DetailModal from '../components/DetailModal';
-import { fetchStats, fetchThreats, fetchLogs, fetchAgents, fetchDistribution, fetchRiskTrend, clearLogs, fetchSystemHealth, fetchSecurityScore, fetchRawEvents } from '../services/api';
+import AIAnalysisPanel from '../components/AIAnalysisPanel';
+import { fetchStats, fetchThreats, fetchLogs, fetchAgents, fetchDistribution, fetchRiskTrend, clearLogs, fetchSystemHealth, fetchSecurityScore, fetchRawEvents, fetchAIAnalysis } from '../services/api';
 import { Shield, RefreshCw } from 'lucide-react';
 
 const Dashboard = () => {
@@ -25,6 +26,7 @@ const Dashboard = () => {
     const [health, setHealth] = useState(null);
     const [securityScore, setSecurityScore] = useState(100);
     const [rawEvents, setRawEvents] = useState([]);
+    const [aiAnalysis, setAiAnalysis] = useState([]);
     const [loading, setLoading] = useState(true);
     const [activeModal, setActiveModal] = useState(null);
 
@@ -32,7 +34,7 @@ const Dashboard = () => {
         try {
             const [
                 statsData, threatsData, logsData, agentsData, distData, trendData,
-                healthData, scoreData, eventsData
+                healthData, scoreData, eventsData, aiData
             ] = await Promise.all([
                 fetchStats(),
                 fetchThreats(),
@@ -42,7 +44,8 @@ const Dashboard = () => {
                 fetchRiskTrend(),
                 fetchSystemHealth(),
                 fetchSecurityScore(),
-                fetchRawEvents()
+                fetchRawEvents(),
+                fetchAIAnalysis()
             ]);
             setStats(statsData);
             setThreats(threatsData);
@@ -53,6 +56,7 @@ const Dashboard = () => {
             setHealth(healthData);
             if (scoreData?.security_score !== undefined) setSecurityScore(scoreData.security_score);
             if (eventsData) setRawEvents(eventsData);
+            if (aiData) setAiAnalysis(aiData);
         } catch (error) {
             console.error("Failed to load dashboard data", error);
         } finally {
@@ -193,7 +197,10 @@ const Dashboard = () => {
                     </div>
                 </div>
 
-
+                {/* 6. AI Threat Analysis */}
+                <div className="w-full">
+                    <AIAnalysisPanel analyses={aiAnalysis} />
+                </div>
 
                 {/* 8. Incident Reports / Forensics */}
                 <div className="w-full mb-12 pt-4">

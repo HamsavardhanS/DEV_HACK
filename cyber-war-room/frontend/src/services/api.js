@@ -119,3 +119,13 @@ export const fetchRawEvents = async () => {
         return ["[10:42:21] MockingAgent simulated event"];
     }
 };
+
+export const fetchAIAnalysis = async () => {
+    try {
+        const res = await api.get('/ai-analysis');
+        return res.data;
+    } catch (error) {
+        console.error("Backend AI analysis unavailable");
+        return [];
+    }
+};
