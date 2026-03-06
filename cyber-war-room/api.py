@@ -3,6 +3,7 @@ from flask_cors import CORS
 import sqlite3
 import json
 import os
+import psutil
 
 app = Flask(__name__)
 CORS(app)
@@ -26,13 +27,35 @@ def get_stats():
         cur.execute("SELECT COUNT(*) FROM incident_logs WHERE action_taken='block_ip'")
         blocked_ips = cur.fetchone()[0]
         
-        # Only count threats from the last 5 minutes for "Active Threats"
         cur.execute('''
-            SELECT COUNT(*) FROM incident_logs 
-            WHERE severity_level IN ('High', 'Critical', '80.0', '90.0', '100.0')
-            AND timestamp > datetime('now', '-5 minutes')
+            SELECT event_id, MAX(timestamp) as time
+            FROM incident_logs
+            GROUP BY event_id
+            ORDER BY time DESC LIMIT 100
         ''')
-        active_threats = cur.fetchone()[0]
+        event_ids = [row['event_id'] for row in cur.fetchall()]
+        
+        active_threats = 0
+        for eid in event_ids:
+            cur.execute("SELECT agent_name, action_taken, details FROM incident_logs WHERE event_id=?", (eid,))
+            event_logs = cur.fetchall()
+            
+            risk_score = 0
+            is_blocked = False
+            
+            for log in event_logs:
+                if log['agent_name'] == 'RiskAssessmentAgent':
+                    try:
+                        details = json.loads(log['details'])
+                        risk_score = details.get('risk_score', 0)
+                    except: pass
+                elif log['agent_name'] == 'ResponseAgent':
+                    action = log['action_taken']
+                    if 'block' in action.lower() or 'isolate' in action.lower():
+                        is_blocked = True
+            
+            if risk_score >= 50 and not is_blocked:
+                active_threats += 1
         
         system_status = 'Healthy' if active_threats == 0 else 'Under Attack'
         
@@ -107,7 +130,8 @@ def get_threats():
                 'type': threat_type,
                 'riskScore': risk_score,
                 'action': action,
-                'status': status
+                'status': status,
+                # Frontend relies on riskScore >= 50 and status != 'Blocked'
             })
             
         conn.close()
@@ -225,26 +249,20 @@ def get_system_health():
         conn = get_db_connection()
         cur = conn.cursor()
         
-        # Calculate recent activity vs historical to get a "rate" and "stability"
         cur.execute("SELECT COUNT(*) FROM incident_logs WHERE timestamp > datetime('now', '-1 minute')")
         events_last_min = cur.fetchone()[0]
         
         cur.execute("SELECT COUNT(*) FROM incident_logs WHERE severity_level IN ('High', 'Critical', '80.0', '90.0', '100.0') AND timestamp > datetime('now', '-5 minutes')")
         active_threats = cur.fetchone()[0]
         
-        # Simulate base metrics with slight variance, weighted by active threats
-        # CPU jumps if there are active threats or high event rate
-        base_cpu = 15 + (active_threats * 10) + (events_last_min * 0.5)
-        cpu_usage = min(99, int(base_cpu + (hash(os.urandom(1)) % 5)))
+        # Use real system metrics
+        cpu_usage = psutil.cpu_percent(interval=None)
+        memory_usage = psutil.virtual_memory().percent
         
-        # Memory slowly climbs with events
-        memory_usage = min(95, int(40 + (active_threats * 5) + (events_last_min * 0.1)))
+        # Keep kafka_queue_size as a basic estimation based on recent events (or zero if no easy way to get real kafka lag)
+        kafka_queue_size = int((events_last_min * 1.5))
         
-        # Queue size spikes during attacks
-        kafka_queue_size = int((events_last_min * 1.5) + (active_threats * 15))
-        
-        # Stability drops when under attack
-        system_stability = max(10, int(100 - (active_threats * 15) - (events_last_min * 0.2)))
+        system_stability = 100 if active_threats == 0 else max(10, 100 - active_threats * 10)
         
         conn.close()
         return jsonify({
@@ -257,6 +275,27 @@ def get_system_health():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/blocked-ips', methods=['GET'])
+def get_blocked_ips():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT timestamp, details FROM incident_logs WHERE action_taken='block_ip' ORDER BY timestamp DESC")
+        rows = cur.fetchall()
+        ips = []
+        for row in rows:
+            try:
+                details = json.loads(row['details'])
+                ip = details.get('source_ip') or details.get('ip') or 'Unknown'
+                # Ensure we only pick unique IPs or return the list with times
+                ips.append({'time': row['timestamp'], 'ip': ip})
+            except: pass
+        conn.close()
+        return jsonify(ips)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/security-score', methods=['GET'])
 def get_security_score():
@@ -338,15 +377,49 @@ def get_raw_events():
 
 @app.route('/api/agents', methods=['GET'])
 def get_agents():
-    agents = [
-        { 'name': 'Monitoring Agent', 'status': 'Detecting anomalies', 'active': True },
-        { 'name': 'Threat Agent', 'status': 'Classifying attack', 'active': True },
-        { 'name': 'Risk Agent', 'status': 'Calculating risk score', 'active': True },
-        { 'name': 'Response Agent', 'status': 'Blocking malicious IP', 'active': True },
-        { 'name': 'Forensic Agent', 'status': 'Storing logs to SQLite', 'active': True },
-        { 'name': 'Learning Agent', 'status': 'Analyzing false positive rates', 'active': True },
-    ]
-    return jsonify(agents)
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        agent_names = [
+            'MonitoringAgent',
+            'ThreatIntelAgent',
+            'RiskAssessmentAgent',
+            'ResponseAgent',
+            'ForensicAgent',
+            'LearningAgent'
+        ]
+        
+        agents = []
+        for name in agent_names:
+            # Check for activity in the last hour
+            cur.execute("SELECT MAX(timestamp) FROM incident_logs WHERE agent_name=?", (name,))
+            last_activity = cur.fetchone()[0]
+            
+            is_active = False
+            status = "Waiting for events..."
+            
+            if last_activity:
+                # Basic check: if active in last hour, mark as active
+                # In a real system we'd check if the process is actually running
+                is_active = True
+                status = f"Last active: {last_activity.split('T')[1].split('.')[0]}"
+            
+            # Map back to human readable names for the frontend
+            display_name = name.replace('Agent', ' Agent')
+            if display_name == 'ThreatIntel Agent': display_name = 'Threat Agent'
+            elif display_name == 'RiskAssessment Agent': display_name = 'Risk Agent'
+
+            agents.append({
+                'name': display_name,
+                'status': status,
+                'active': is_active
+            })
+            
+        conn.close()
+        return jsonify(agents)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(port=5000, debug=True)

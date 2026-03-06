@@ -1,7 +1,7 @@
 import React from 'react';
 import { Target } from 'lucide-react';
 
-const SecurityScoreGauge = ({ score }) => {
+const SecurityScoreGauge = ({ score, onClick }) => {
     // If we don't have a score yet, show a pulsing placeholder
     const currentScore = score !== undefined ? score : 100;
 
@@ -24,7 +24,10 @@ const SecurityScoreGauge = ({ score }) => {
     const strokeDashoffset = circumference - (currentScore / 100) * circumference;
 
     return (
-        <div className="relative overflow-hidden bg-slate-900/40 backdrop-blur-md border border-slate-700/50 rounded-xl p-5 shadow-[0_4px_20px_rgba(0,0,0,0.4)] flex flex-col items-center justify-center">
+        <div
+            className="relative overflow-hidden bg-slate-900/40 backdrop-blur-md border border-slate-700/50 rounded-xl p-5 shadow-[0_4px_20px_rgba(0,0,0,0.4)] flex flex-col items-center justify-center cursor-pointer hover:border-cyan-500/50 transition-all group"
+            onClick={onClick}
+        >
             <h3 className="text-sm font-bold text-slate-200 tracking-wider mb-4 uppercase flex items-center gap-2">
                 <Target className="w-4 h-4 text-slate-400" />
                 Security Posture

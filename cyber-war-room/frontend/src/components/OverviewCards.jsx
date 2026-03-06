@@ -1,7 +1,7 @@
 import React from 'react';
 import { Activity, ShieldAlert, Ban, Server } from 'lucide-react';
 
-const OverviewCards = ({ stats }) => {
+const OverviewCards = ({ stats, onCardClick }) => {
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
 
@@ -15,7 +15,10 @@ const OverviewCards = ({ stats }) => {
                 </div>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-lg flex items-center space-x-4">
+            <div
+                className="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-lg flex items-center space-x-4 cursor-pointer hover:border-red-500/50 transition-colors"
+                onClick={() => onCardClick && onCardClick('activeThreats')}
+            >
                 <div className="p-3 bg-red-500/20 text-red-500 rounded-lg">
                     <ShieldAlert size={24} />
                 </div>
@@ -25,7 +28,10 @@ const OverviewCards = ({ stats }) => {
                 </div>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-lg flex items-center space-x-4">
+            <div
+                className="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-lg flex items-center space-x-4 cursor-pointer hover:border-orange-500/50 transition-colors"
+                onClick={() => onCardClick && onCardClick('blockedIps')}
+            >
                 <div className="p-3 bg-orange-500/20 text-orange-400 rounded-lg">
                     <Ban size={24} />
                 </div>
@@ -36,8 +42,8 @@ const OverviewCards = ({ stats }) => {
             </div>
 
             <div className={`border p-4 rounded-xl shadow-lg flex items-center space-x-4 transition-all duration-500 ${stats?.systemStatus === 'Under Attack'
-                    ? 'bg-red-500/20 border-red-500/50 animate-pulse'
-                    : 'bg-emerald-500/20 border-emerald-500/50'
+                ? 'bg-red-500/20 border-red-500/50 animate-pulse'
+                : 'bg-emerald-500/20 border-emerald-500/50'
                 }`}>
                 <div className={`p-3 rounded-lg ${stats?.systemStatus === 'Under Attack' ? 'bg-red-500 text-white' : 'bg-emerald-500 text-white'
                     }`}>

@@ -3,10 +3,7 @@ import OverviewCards from '../components/OverviewCards';
 import ThreatTable from '../components/ThreatTable';
 import AttackChart from '../components/AttackChart';
 import RiskChart from '../components/RiskChart';
-import AgentStatus from '../components/AgentStatus';
 import LogsPanel from '../components/LogsPanel';
-import AdminActions from '../components/AdminActions';
-import IncidentWorkflow from '../components/IncidentWorkflow';
 import SystemHealth from '../components/SystemHealth';
 import HealthComparison from '../components/HealthComparison';
 import HealthGraph from '../components/HealthGraph';
@@ -14,6 +11,7 @@ import ThreatAlertBanner from '../components/ThreatAlertBanner';
 import SecurityScoreGauge from '../components/SecurityScoreGauge';
 import ThreatHeatmap from '../components/ThreatHeatmap';
 import LiveEventStream from '../components/LiveEventStream';
+import DetailModal from '../components/DetailModal';
 import { fetchStats, fetchThreats, fetchLogs, fetchAgents, fetchDistribution, fetchRiskTrend, clearLogs, fetchSystemHealth, fetchSecurityScore, fetchRawEvents } from '../services/api';
 import { Shield, RefreshCw } from 'lucide-react';
 
@@ -28,6 +26,7 @@ const Dashboard = () => {
     const [securityScore, setSecurityScore] = useState(100);
     const [rawEvents, setRawEvents] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [activeModal, setActiveModal] = useState(null);
 
     const loadData = async () => {
         try {
@@ -137,10 +136,10 @@ const Dashboard = () => {
                 {/* 1. Core Security Rating & Top Metrics Cards */}
                 <div className="flex flex-col xl:flex-row gap-6">
                     <div className="xl:w-[250px] shrink-0">
-                        <SecurityScoreGauge score={securityScore} />
+                        <SecurityScoreGauge score={securityScore} onClick={() => setActiveModal('activeThreats')} />
                     </div>
                     <div className="flex-1 w-full">
-                        <OverviewCards stats={stats} />
+                        <OverviewCards stats={stats} onCardClick={setActiveModal} />
                     </div>
                 </div>
 
@@ -194,22 +193,21 @@ const Dashboard = () => {
                     </div>
                 </div>
 
-                {/* 6. Actions & Workflow (2-Column Grid) */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <AdminActions />
-                    <IncidentWorkflow />
-                </div>
 
-                {/* 7. Agent Status (Reference UI style grid) */}
-                <div className="w-full pt-4">
-                    <AgentStatus agents={agents} />
-                </div>
 
                 {/* 8. Incident Reports / Forensics */}
                 <div className="w-full mb-12 pt-4">
                     <LogsPanel logs={logs} />
                 </div>
             </div>
+
+            {/* Modals */}
+            <DetailModal
+                isOpen={!!activeModal}
+                type={activeModal}
+                onClose={() => setActiveModal(null)}
+                threats={threats}
+            />
         </div>
     );
 };
