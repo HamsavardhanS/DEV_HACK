@@ -21,5 +21,6 @@ def get_consumer(topic: str, group_id: str, bootstrap_servers: str = 'localhost:
         group_id=group_id,
         auto_offset_reset='earliest',
         enable_auto_commit=True,
-        value_deserializer=lambda x: json.loads(x.decode('utf-8'))
+        value_deserializer=lambda x: json.loads(x.decode('utf-8')),
+        api_version=(0, 11, 5) # Fixes MemberIdRequiredError
     )

@@ -12,10 +12,9 @@ INPUT_TOPIC = "risk-events"
 OUTPUT_TOPIC = "response-events"
 
 def run_response_agent():
-    print(f"Starting {AGENT_NAME}...")
     consumer = get_consumer(INPUT_TOPIC, group_id="response-group")
     producer = get_producer()
-    print(f"{AGENT_NAME} listening on topic: {INPUT_TOPIC}")
+    # print(f"{AGENT_NAME} listening on topic: {INPUT_TOPIC}")
 
     try:
         for message in consumer:
@@ -30,18 +29,24 @@ def run_response_agent():
             if risk_score >= 80:
                 action = "isolate_host"
                 justification = f"Risk score {risk_score} >= 80. Immediate isolation required for {target_ip}."
+                system_impact = "High: Host disconnected from network."
             elif 50 <= risk_score < 80:
                 action = "block_ip"
                 justification = f"Risk score {risk_score} is between 50 and 79. Blocking IP {target_ip} at the firewall."
+                system_impact = "Medium: External IP blocked, no internal service disruption."
             else:
                 action = "monitor"
                 justification = f"Risk score {risk_score} is below 50. Continuing to monitor {target_ip}."
+                system_impact = "Low: No active intervention."
 
-            print(f"[{AGENT_NAME}] Taking Action: {action.upper()} on {target_ip} -> {justification}")
+            print(f">>> ALERT: {action.upper()} triggered for IP {target_ip}")
+            print(f"    REASON: {justification}")
+            print(f"    IMPACT: {system_impact}\n")
 
             new_payload = {
                 "action_taken": action,
                 "justification": justification,
+                "system_impact": system_impact,
                 **payload
             }
             
@@ -49,7 +54,8 @@ def run_response_agent():
                 source_agent=AGENT_NAME,
                 payload=new_payload,
                 confidence_score=incoming_event.confidence_score,
-                reasoning=f"Action '{action}' selected based on risk threshold rules."
+                reasoning=f"Action '{action}' selected based on risk threshold rules.",
+                event_id=incoming_event.event_id
             )
             
             producer.send(OUTPUT_TOPIC, value=asdict(out_event))
