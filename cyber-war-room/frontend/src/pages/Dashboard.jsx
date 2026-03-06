@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import OverviewCards from '../components/OverviewCards';
 import ThreatTable from '../components/ThreatTable';
 import AttackChart from '../components/AttackChart';
@@ -12,8 +12,14 @@ import SecurityScoreGauge from '../components/SecurityScoreGauge';
 import ThreatHeatmap from '../components/ThreatHeatmap';
 import LiveEventStream from '../components/LiveEventStream';
 import DetailModal from '../components/DetailModal';
-import { fetchStats, fetchThreats, fetchLogs, fetchAgents, fetchDistribution, fetchRiskTrend, clearLogs, fetchSystemHealth, fetchSecurityScore, fetchRawEvents } from '../services/api';
-import { Shield, RefreshCw } from 'lucide-react';
+import ToastContainer from '../components/ToastContainer';
+import GeoAttackMap from '../components/GeoAttackMap';
+import {
+    fetchStats, fetchThreats, fetchLogs, fetchAgents,
+    fetchDistribution, fetchRiskTrend, clearLogs,
+    fetchSystemHealth, fetchSecurityScore, fetchRawEvents
+} from '../services/api';
+import { Shield, RefreshCw, Download, FileText } from 'lucide-react';
 
 const Dashboard = () => {
     const [stats, setStats] = useState(null);
@@ -28,11 +34,26 @@ const Dashboard = () => {
     const [loading, setLoading] = useState(true);
     const [activeModal, setActiveModal] = useState(null);
 
+    // Dynamic security score: computed from real threat data
+    const computeScore = (threats) => {
+        if (!threats || threats.length === 0) return 100;
+        const unblockedCritical = threats.filter(t => t.riskScore >= 80 && t.status !== 'Blocked').length;
+        const unblockedHigh = threats.filter(t => t.riskScore >= 50 && t.riskScore < 80 && t.status !== 'Blocked').length;
+        const blockedCritical = threats.filter(t => t.riskScore >= 80 && t.status === 'Blocked').length;
+        const blockedHigh = threats.filter(t => t.riskScore >= 50 && t.riskScore < 80 && t.status === 'Blocked').length;
+        let score = 100;
+        score -= unblockedCritical * 15;  // Active critical — big hit
+        score -= unblockedHigh * 8;   // Active high
+        score -= blockedCritical * 5;   // Mitigated critical — still dings
+        score -= blockedHigh * 2;   // Mitigated high — small ding
+        return Math.max(0, Math.min(100, Math.round(score)));
+    };
+
     const loadData = async () => {
         try {
             const [
                 statsData, threatsData, logsData, agentsData, distData, trendData,
-                healthData, scoreData, eventsData
+                healthData, eventsData
             ] = await Promise.all([
                 fetchStats(),
                 fetchThreats(),
@@ -41,17 +62,18 @@ const Dashboard = () => {
                 fetchDistribution(),
                 fetchRiskTrend(),
                 fetchSystemHealth(),
-                fetchSecurityScore(),
                 fetchRawEvents()
             ]);
             setStats(statsData);
-            setThreats(threatsData);
+            if (threatsData) {
+                setThreats(threatsData);
+                setSecurityScore(computeScore(threatsData));
+            }
             setLogs(logsData);
-            setAgents(agentsData);
+            setAgents(agentsData || []);
             setDistribution(distData);
             setRiskTrend(trendData);
             setHealth(healthData);
-            if (scoreData?.security_score !== undefined) setSecurityScore(scoreData.security_score);
             if (eventsData) setRawEvents(eventsData);
         } catch (error) {
             console.error("Failed to load dashboard data", error);
@@ -67,9 +89,17 @@ const Dashboard = () => {
         }
     };
 
+    const handleExport = () => {
+        const link = document.createElement('a');
+        link.href = 'http://localhost:5000/api/export/report';
+        link.download = `incident_report_${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
     useEffect(() => {
         loadData();
-        // Poll every 3 seconds for real-time updates
         const interval = setInterval(loadData, 3000);
         return () => clearInterval(interval);
     }, []);
@@ -86,6 +116,9 @@ const Dashboard = () => {
 
     return (
         <div className="min-h-screen text-slate-300 p-4 font-sans selection:bg-cyan-500/30">
+            {/* Toast Notifications — fixed position, shows on new threats */}
+            <ToastContainer threats={threats} />
+
             {/* Main Container */}
             <div className="max-w-[1400px] mx-auto space-y-6">
 
@@ -100,26 +133,46 @@ const Dashboard = () => {
                                 Cybersecurity War Room
                             </h1>
                             <p className="text-slate-400 text-sm flex items-center gap-1.5 mt-0.5 font-mono text-[11px] tracking-wide">
-                                ⚡ Agentic AI Autonomous Threat Detection & Response
+                                ⚡ Agentic AI Autonomous Threat Detection &amp; Response
                             </p>
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-6 mt-4 md:mt-0">
+                    <div className="flex items-center gap-4 mt-4 md:mt-0">
                         {/* Status Indicator */}
                         <div className="flex items-baseline gap-2">
                             <span className="relative flex h-2 w-2 top-[1px]">
-                                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${stats?.systemStatus === 'Under Attack' ? 'bg-red-500' : 'bg-emerald-400'}`}></span>
-                                <span className={`relative inline-flex rounded-full h-2 w-2 ${stats?.systemStatus === 'Under Attack' ? 'bg-red-500' : 'bg-emerald-500'}`}></span>
+                                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${stats?.systemStatus === 'Under Attack' ? 'bg-red-500'
+                                    : stats?.systemStatus === 'Mitigated' ? 'bg-amber-500'
+                                        : 'bg-emerald-400'
+                                    }`}></span>
+                                <span className={`relative inline-flex rounded-full h-2 w-2 ${stats?.systemStatus === 'Under Attack' ? 'bg-red-500'
+                                    : stats?.systemStatus === 'Mitigated' ? 'bg-amber-500'
+                                        : 'bg-emerald-500'
+                                    }`}></span>
                             </span>
-                            <span className="font-mono text-sm tracking-wide text-slate-300 opacity-90">
+                            <span className={`font-mono text-sm tracking-wide opacity-90 ${stats?.systemStatus === 'Under Attack' ? 'text-red-400 font-bold'
+                                : stats?.systemStatus === 'Mitigated' ? 'text-amber-400'
+                                    : 'text-slate-300'
+                                }`}>
                                 {stats?.systemStatus || 'System Online'}
                             </span>
                             <span className="text-slate-600 mx-1">|</span>
                             <span className="font-mono text-sm tracking-wide text-slate-400">
-                                Agents: 6/6 Active
+                                Agents: {agents.filter(a => a.active).length}/{agents.length || 6} Active
                             </span>
                         </div>
+
+                        {/* Export Report Button */}
+                        <button
+                            onClick={handleExport}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-cyan-400 rounded border border-slate-700/50 hover:border-cyan-500/40 transition-all shadow-sm font-mono text-xs"
+                            title="Export incident report as JSON"
+                        >
+                            <Download className="w-3.5 h-3.5" />
+                            Export
+                        </button>
+
                         <button
                             onClick={handleReset}
                             className="flex items-center gap-2 px-3 py-1.5 bg-slate-900/80 hover:bg-slate-800 text-slate-300 rounded border border-slate-700/50 transition-all shadow-sm font-mono text-xs"
@@ -131,7 +184,7 @@ const Dashboard = () => {
                 </header>
 
                 {/* Top Alert Banner */}
-                <ThreatAlertBanner activeThreats={threats} />
+                <ThreatAlertBanner activeThreats={threats} onViewAll={() => setActiveModal('activeThreats')} />
 
                 {/* 1. Core Security Rating & Top Metrics Cards */}
                 <div className="flex flex-col xl:flex-row gap-6">
@@ -153,7 +206,7 @@ const Dashboard = () => {
                     </div>
                 </div>
 
-                {/* 3. System Health Suite (3 Columns) */}
+                {/* 3. System Health Suite */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
                     <div className="lg:col-span-2 h-full">
                         <SystemHealth health={health} />
@@ -163,39 +216,36 @@ const Dashboard = () => {
                     </div>
                 </div>
 
-                {/* 4. Analytics Section (Graph, Heatmap, Attack Chart) */}
+                {/* 4. Analytics Section */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
-                    {/* Live Health Line Graph */}
                     <div className="lg:col-span-2 h-full">
                         <HealthGraph currentHealth={health} />
                     </div>
-
                     <div className="h-full min-h-[350px]">
                         <RiskChart data={riskTrend} />
                     </div>
                     <div className="h-full min-h-[350px]">
                         <AttackChart distribution={distribution} />
                     </div>
-
-                    {/* Threat Heatmap */}
                     <div className="lg:col-span-2 h-full">
-                        <ThreatHeatmap distribution={distribution} />
+                        <ThreatHeatmap />
                     </div>
                 </div>
 
-                {/* 5. Live Threat Monitoring and Raw Stream Box */}
+                {/* 5. Geo Attack Map */}
+                <GeoAttackMap threats={threats} />
+
+                {/* 6. Live Threat Monitoring and Raw Stream */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
                     <div className="lg:col-span-2 h-full">
-                        <ThreatTable threats={threats} />
+                        <ThreatTable threats={threats} onViewThreats={() => setActiveModal('activeThreats')} />
                     </div>
                     <div className="h-full">
                         <LiveEventStream rawEvents={rawEvents} />
                     </div>
                 </div>
 
-
-
-                {/* 8. Incident Reports / Forensics */}
+                {/* 7. Incident Reports / Forensics */}
                 <div className="w-full mb-12 pt-4">
                     <LogsPanel logs={logs} />
                 </div>

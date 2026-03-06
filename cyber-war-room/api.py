@@ -15,6 +15,27 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+def ensure_geo_table():
+    """Create geo_cache table if it doesn't exist."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS geo_cache (
+            ip TEXT PRIMARY KEY,
+            country TEXT,
+            country_code TEXT,
+            city TEXT,
+            lat REAL,
+            lon REAL,
+            looked_up_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+# Ensure geo table exists on startup
+ensure_geo_table()
+
+
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     try:
@@ -36,6 +57,7 @@ def get_stats():
         event_ids = [row['event_id'] for row in cur.fetchall()]
         
         active_threats = 0
+        unblocked_threats = 0
         for eid in event_ids:
             cur.execute("SELECT agent_name, action_taken, details FROM incident_logs WHERE event_id=?", (eid,))
             event_logs = cur.fetchall()
@@ -54,10 +76,19 @@ def get_stats():
                     if 'block' in action.lower() or 'isolate' in action.lower():
                         is_blocked = True
             
-            if risk_score >= 50 and not is_blocked:
-                active_threats += 1
+            if risk_score >= 50:
+                active_threats += 1  # Count ALL high-risk (matches modal filter)
+                if not is_blocked:
+                    unblocked_threats += 1
         
-        system_status = 'Healthy' if active_threats == 0 else 'Under Attack'
+        # System is 'Under Attack' if any unblocked high-risk threats exist,
+        # 'Mitigated' if all high-risk threats are blocked, 'Healthy' if none
+        if unblocked_threats > 0:
+            system_status = 'Under Attack'
+        elif active_threats > 0:
+            system_status = 'Mitigated'
+        else:
+            system_status = 'Healthy'
         
         conn.close()
         return jsonify({
@@ -135,11 +166,83 @@ def get_threats():
             })
             
         conn.close()
-        conn.close()
         # Return all threats (both Blocked and Monitored) as requested
         return jsonify(threats)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/heatmap', methods=['GET'])
+def get_heatmap():
+    """Return threat counts per type per minute for last 10 minutes."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        threat_types = ['DDoS', 'Brute Force', 'Malware', 'Privilege Escalation', 'Suspicious Activity']
+        
+        # Fetch last 1000 ThreatIntel rows — filter in Python to avoid SQLite timezone issues
+        cur.execute('''
+            SELECT timestamp, details FROM incident_logs
+            WHERE agent_name='ThreatIntelAgent'
+            ORDER BY timestamp DESC LIMIT 1000
+        ''')
+        rows = cur.fetchall()
+        conn.close()
+        
+        from datetime import datetime, timedelta, timezone
+        import re
+        
+        now_utc = datetime.now(timezone.utc)
+        now_local = datetime.now()
+        window_start_utc = now_utc - timedelta(minutes=10)
+        
+        # Build 10 1-minute buckets in LOCAL time for display
+        buckets = {}
+        bucket_order = []
+        for i in range(9, -1, -1):
+            t_local = now_local - timedelta(minutes=i)
+            key = t_local.strftime('%H:%M')
+            buckets[key] = {typ: 0 for typ in threat_types}
+            bucket_order.append(key)
+        
+        utc_offset = timedelta(hours=5, minutes=30)  # IST = UTC+5:30 (detected from system)
+        
+        for row in rows:
+            ts_str = row['timestamp']
+            try:
+                # Parse ISO 8601 with timezone like '2026-03-06T09:12:20.933400+00:00'
+                # Remove timezone info and microseconds for simple parsing
+                ts_clean = re.sub(r'[+\-]\d{2}:\d{2}$', '', ts_str).replace('T', ' ').split('.')[0].strip()
+                ts_utc = datetime.strptime(ts_clean, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                
+                # Only include events within the last 10 minutes (UTC)
+                if ts_utc < window_start_utc:
+                    continue
+                
+                # Convert to local time for bucketing
+                ts_local = ts_utc + utc_offset
+                minute_key = ts_local.strftime('%H:%M')
+                
+                if minute_key in buckets:
+                    try:
+                        details = json.loads(row['details'])
+                        atype = details.get('attack_type', 'Suspicious Activity')
+                        if atype in buckets[minute_key]:
+                            buckets[minute_key][atype] += 1
+                        else:
+                            buckets[minute_key]['Suspicious Activity'] += 1
+                    except:
+                        pass
+            except Exception:
+                pass
+        
+        heatmap = [{'time': k, 'counts': buckets[k]} for k in bucket_order]
+        return jsonify({'slots': heatmap, 'types': threat_types})
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 
 @app.route('/api/logs', methods=['GET'])
 def get_logs():
@@ -297,38 +400,6 @@ def get_blocked_ips():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/security-score', methods=['GET'])
-def get_security_score():
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        
-        # Security score is 100 minus the average risk score of the last 10 minutes
-        cur.execute('''
-            SELECT details FROM incident_logs 
-            WHERE agent_name='RiskAssessmentAgent' 
-            AND timestamp > datetime('now', '-10 minutes')
-        ''')
-        rows = cur.fetchall()
-        
-        total_risk = 0
-        count = 0
-        for row in rows:
-            try:
-                details = json.loads(row['details'])
-                total_risk += details.get('risk_score', 0)
-                count += 1
-            except: pass
-            
-        avg_risk = (total_risk / count) if count > 0 else 0
-        
-        # Base score 100, drops by average active risk.
-        security_score = max(0, min(100, int(100 - avg_risk)))
-        
-        conn.close()
-        return jsonify({'security_score': security_score})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/events', methods=['GET'])
 def get_raw_events():
@@ -420,6 +491,174 @@ def get_agents():
         return jsonify(agents)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/security-score', methods=['GET'])
+def get_security_score():
+    """Dynamic security score: starts at 100, deducted by threat severity."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute('''
+            SELECT event_id FROM incident_logs
+            GROUP BY event_id
+            ORDER BY MAX(timestamp) DESC LIMIT 100
+        ''')
+        event_ids = [row[0] for row in cur.fetchall()]
+
+        score = 100
+        for eid in event_ids:
+            cur.execute("SELECT agent_name, action_taken, details FROM incident_logs WHERE event_id=?", (eid,))
+            logs = cur.fetchall()
+            risk_score = 0
+            is_blocked = False
+            for log in logs:
+                if log['agent_name'] == 'RiskAssessmentAgent':
+                    try:
+                        score_val = json.loads(log['details']).get('risk_score', 0)
+                        risk_score = max(risk_score, score_val)
+                    except: pass
+                elif log['agent_name'] == 'ResponseAgent':
+                    if 'block' in log['action_taken'].lower() or 'isolate' in log['action_taken'].lower():
+                        is_blocked = True
+            if risk_score >= 80 and not is_blocked:
+                score -= 15
+            elif risk_score >= 50 and not is_blocked:
+                score -= 8
+            elif risk_score >= 80:
+                score -= 3  # blocked critical still dings a little
+        score = max(0, min(100, score))
+        conn.close()
+        return jsonify({'security_score': round(score)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/geo-threats', methods=['GET'])
+def get_geo_threats():
+    """Return geo-enriched blocked IPs — stores results in geo_cache table."""
+    try:
+        import urllib.request as urlreq
+        from datetime import datetime
+
+        ensure_geo_table()
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Extract distinct blocked IPs from incident_logs
+        cur.execute('''
+            SELECT DISTINCT json_extract(details, '$.source_ip') as ip
+            FROM incident_logs
+            WHERE action_taken LIKE '%block%'
+            AND json_extract(details, '$.source_ip') IS NOT NULL
+        ''')
+        all_ips = [r['ip'] for r in cur.fetchall()
+                   if r['ip'] and not r['ip'].startswith('192.168')
+                   and not r['ip'].startswith('10.')
+                   and not r['ip'].startswith('127.')]
+
+        # Find IPs not yet in geo_cache
+        cur.execute('SELECT ip FROM geo_cache')
+        cached_ips = {r['ip'] for r in cur.fetchall()}
+        new_ips = [ip for ip in all_ips if ip not in cached_ips][:50]
+
+        # Batch lookup new IPs via ip-api.com
+        if new_ips:
+            try:
+                batch_data = json.dumps([{'query': ip} for ip in new_ips]).encode()
+                req = urlreq.Request(
+                    'http://ip-api.com/batch?fields=status,country,countryCode,city,lat,lon,query',
+                    data=batch_data,
+                    headers={'Content-Type': 'application/json'}
+                )
+                with urlreq.urlopen(req, timeout=5) as resp:
+                    geo_results = json.loads(resp.read())
+
+                now = datetime.utcnow().isoformat()
+                for item in geo_results:
+                    if item.get('status') == 'success':
+                        cur.execute('''
+                            INSERT OR REPLACE INTO geo_cache
+                            (ip, country, country_code, city, lat, lon, looked_up_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            item.get('query'),
+                            item.get('country', 'Unknown'),
+                            item.get('countryCode', 'XX'),
+                            item.get('city', ''),
+                            item.get('lat', 0),
+                            item.get('lon', 0),
+                            now
+                        ))
+                conn.commit()
+            except Exception as e:
+                print(f'Geo lookup error: {e}')
+
+        # Return all cached geo data for blocked IPs
+        cur.execute('SELECT * FROM geo_cache ORDER BY looked_up_at DESC')
+        rows = cur.fetchall()
+        conn.close()
+
+        geo_threats = [{
+            'ip': r['ip'],
+            'country': r['country'],
+            'countryCode': r['country_code'],
+            'city': r['city'],
+            'lat': r['lat'],
+            'lon': r['lon'],
+            'riskScore': 80,
+        } for r in rows]
+
+        return jsonify({'geoThreats': geo_threats})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/export/report', methods=['GET'])
+def export_report():
+    """Export a full incident report as downloadable JSON."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Stats
+        cur.execute("SELECT COUNT(*) FROM incident_logs WHERE agent_name='MonitoringAgent'")
+        total_events = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM incident_logs WHERE action_taken='block_ip'")
+        blocked_ips = cur.fetchone()[0]
+
+        # Last 50 threats
+        cur.execute('''
+            SELECT timestamp, agent_name, action_taken, details
+            FROM incident_logs ORDER BY timestamp DESC LIMIT 50
+        ''')
+        rows = cur.fetchall()
+        logs = []
+        for r in rows:
+            try:
+                d = json.loads(r['details'])
+            except:
+                d = r['details']
+            logs.append({'timestamp': r['timestamp'], 'agent': r['agent_name'], 'action': r['action_taken'], 'details': d})
+
+        conn.close()
+
+        report = {
+            'generated_at': __import__('datetime').datetime.utcnow().isoformat() + 'Z',
+            'summary': {
+                'total_events': total_events,
+                'blocked_ips': blocked_ips,
+            },
+            'recent_incidents': logs
+        }
+
+        response = jsonify(report)
+        response.headers['Content-Disposition'] = 'attachment; filename=incident_report.json'
+        return response
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 if __name__ == '__main__':
     app.run(port=5000, debug=True)

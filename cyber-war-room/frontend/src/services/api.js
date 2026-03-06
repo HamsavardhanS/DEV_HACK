@@ -40,6 +40,16 @@ export const fetchBlockedIps = async () => {
     }
 };
 
+export const fetchHeatmap = async () => {
+    try {
+        const res = await api.get('/heatmap');
+        return res.data;
+    } catch (error) {
+        console.error("Backend heatmap unavailable");
+        return null;
+    }
+};
+
 export const fetchLogs = async () => {
     try {
         const res = await api.get('/logs');
