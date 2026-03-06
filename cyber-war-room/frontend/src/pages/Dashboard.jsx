@@ -7,7 +7,14 @@ import AgentStatus from '../components/AgentStatus';
 import LogsPanel from '../components/LogsPanel';
 import AdminActions from '../components/AdminActions';
 import IncidentWorkflow from '../components/IncidentWorkflow';
-import { fetchStats, fetchThreats, fetchLogs, fetchAgents, fetchDistribution, fetchRiskTrend, clearLogs } from '../services/api';
+import SystemHealth from '../components/SystemHealth';
+import HealthComparison from '../components/HealthComparison';
+import HealthGraph from '../components/HealthGraph';
+import ThreatAlertBanner from '../components/ThreatAlertBanner';
+import SecurityScoreGauge from '../components/SecurityScoreGauge';
+import ThreatHeatmap from '../components/ThreatHeatmap';
+import LiveEventStream from '../components/LiveEventStream';
+import { fetchStats, fetchThreats, fetchLogs, fetchAgents, fetchDistribution, fetchRiskTrend, clearLogs, fetchSystemHealth, fetchSecurityScore, fetchRawEvents } from '../services/api';
 import { Shield, RefreshCw } from 'lucide-react';
 
 const Dashboard = () => {
@@ -17,17 +24,26 @@ const Dashboard = () => {
     const [riskTrend, setRiskTrend] = useState([]);
     const [logs, setLogs] = useState([]);
     const [agents, setAgents] = useState([]);
+    const [health, setHealth] = useState(null);
+    const [securityScore, setSecurityScore] = useState(100);
+    const [rawEvents, setRawEvents] = useState([]);
     const [loading, setLoading] = useState(true);
 
     const loadData = async () => {
         try {
-            const [statsData, threatsData, logsData, agentsData, distData, trendData] = await Promise.all([
+            const [
+                statsData, threatsData, logsData, agentsData, distData, trendData,
+                healthData, scoreData, eventsData
+            ] = await Promise.all([
                 fetchStats(),
                 fetchThreats(),
                 fetchLogs(),
                 fetchAgents(),
                 fetchDistribution(),
-                fetchRiskTrend()
+                fetchRiskTrend(),
+                fetchSystemHealth(),
+                fetchSecurityScore(),
+                fetchRawEvents()
             ]);
             setStats(statsData);
             setThreats(threatsData);
@@ -35,6 +51,9 @@ const Dashboard = () => {
             setAgents(agentsData);
             setDistribution(distData);
             setRiskTrend(trendData);
+            setHealth(healthData);
+            if (scoreData?.security_score !== undefined) setSecurityScore(scoreData.security_score);
+            if (eventsData) setRawEvents(eventsData);
         } catch (error) {
             console.error("Failed to load dashboard data", error);
         } finally {
@@ -112,36 +131,81 @@ const Dashboard = () => {
                     </div>
                 </header>
 
-                {/* 1. Top Metrics Cards */}
-                <OverviewCards stats={stats} />
+                {/* Top Alert Banner */}
+                <ThreatAlertBanner activeThreats={threats} />
 
-                {/* 2. Analytics Section (Line & Bar Chart Side-by-Side) */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div className="h-[350px]">
+                {/* 1. Core Security Rating & Top Metrics Cards */}
+                <div className="flex flex-col xl:flex-row gap-6">
+                    <div className="xl:w-[250px] shrink-0">
+                        <SecurityScoreGauge score={securityScore} />
+                    </div>
+                    <div className="flex-1 w-full">
+                        <OverviewCards stats={stats} />
+                    </div>
+                </div>
+
+                {/* 2. Live Event Stream Ticker */}
+                <div className="w-full h-[60px] overflow-hidden rounded-xl border border-slate-700/50 bg-slate-900/60 flex items-center px-4 font-mono text-xs shadow-inner">
+                    <div className="text-cyan-400 font-bold mr-4 shrink-0 whitespace-nowrap">LIVE STREAM &gt;</div>
+                    <div className="flex-1 overflow-hidden relative leading-relaxed">
+                        <div className="absolute whitespace-nowrap text-slate-400">
+                            {(rawEvents || []).slice(-1)[0] || "Waiting for telemetry..."}
+                        </div>
+                    </div>
+                </div>
+
+                {/* 3. System Health Suite (3 Columns) */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
+                    <div className="lg:col-span-2 h-full">
+                        <SystemHealth health={health} />
+                    </div>
+                    <div className="h-full">
+                        <HealthComparison health={health} />
+                    </div>
+                </div>
+
+                {/* 4. Analytics Section (Graph, Heatmap, Attack Chart) */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
+                    {/* Live Health Line Graph */}
+                    <div className="lg:col-span-2 h-full">
+                        <HealthGraph currentHealth={health} />
+                    </div>
+
+                    <div className="h-full min-h-[350px]">
                         <RiskChart data={riskTrend} />
                     </div>
-                    <div className="h-[350px]">
+                    <div className="h-full min-h-[350px]">
                         <AttackChart distribution={distribution} />
+                    </div>
+
+                    {/* Threat Heatmap */}
+                    <div className="lg:col-span-2 h-full">
+                        <ThreatHeatmap distribution={distribution} />
                     </div>
                 </div>
 
-                {/* 3. Live Threat Monitoring */}
-                <div className="w-full">
-                    <ThreatTable threats={threats} />
+                {/* 5. Live Threat Monitoring and Raw Stream Box */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
+                    <div className="lg:col-span-2 h-full">
+                        <ThreatTable threats={threats} />
+                    </div>
+                    <div className="h-full">
+                        <LiveEventStream rawEvents={rawEvents} />
+                    </div>
                 </div>
 
-                {/* 4. Actions & Workflow (2-Column Grid) */}
+                {/* 6. Actions & Workflow (2-Column Grid) */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <AdminActions />
                     <IncidentWorkflow />
                 </div>
 
-                {/* 5. Agent Status (Reference UI style grid) */}
+                {/* 7. Agent Status (Reference UI style grid) */}
                 <div className="w-full pt-4">
                     <AgentStatus agents={agents} />
                 </div>
 
-                {/* 6. Incident Reports / Forensics */}
+                {/* 8. Incident Reports / Forensics */}
                 <div className="w-full mb-12 pt-4">
                     <LogsPanel logs={logs} />
                 </div>

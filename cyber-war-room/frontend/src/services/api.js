@@ -113,3 +113,33 @@ export const clearLogs = async () => {
         return { status: 'error' };
     }
 };
+
+export const fetchSystemHealth = async () => {
+    try {
+        const res = await api.get('/system-health');
+        return res.data;
+    } catch (error) {
+        console.warn("Backend not available, using mock system health");
+        return { cpu_usage: 34, memory_usage: 58, kafka_queue_size: 21, event_processing_rate: 120, active_threats: 3, system_stability: 92 };
+    }
+};
+
+export const fetchSecurityScore = async () => {
+    try {
+        const res = await api.get('/security-score');
+        return res.data;
+    } catch (error) {
+        console.warn("Backend not available, using mock security score");
+        return { security_score: 85 };
+    }
+};
+
+export const fetchRawEvents = async () => {
+    try {
+        const res = await api.get('/events');
+        return res.data;
+    } catch (error) {
+        console.warn("Backend not available, using mock events");
+        return ["[10:42:21] MockingAgent simulated event"];
+    }
+};

@@ -112,9 +112,8 @@ def get_threats():
             
         conn.close()
         conn.close()
-        # Filter: Only show "Blocked" threats to remove "monitoring stage" clutter as requested
-        filtered_threats = [t for t in threats if t['status'] == 'Blocked']
-        return jsonify(filtered_threats)
+        # Return all threats (both Blocked and Monitored) as requested
+        return jsonify(threats)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -211,13 +210,129 @@ def get_risk_trend():
             try:
                 details = json.loads(row['details'])
                 score = details.get('risk_score', 0)
-                # Parse timestamp to simple HH:MM:SS for proper graph alignment
-                time_str = row['timestamp'].split('T')[1].split('.')[0][:8]
-                trend.append({'time': time_str, 'score': score})
+                # Send full timestamp to allow frontend timezone conversion
+                trend.append({'time': row['timestamp'], 'score': score})
             except: pass
             
         conn.close()
         return jsonify(trend)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/system-health', methods=['GET'])
+def get_system_health():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Calculate recent activity vs historical to get a "rate" and "stability"
+        cur.execute("SELECT COUNT(*) FROM incident_logs WHERE timestamp > datetime('now', '-1 minute')")
+        events_last_min = cur.fetchone()[0]
+        
+        cur.execute("SELECT COUNT(*) FROM incident_logs WHERE severity_level IN ('High', 'Critical', '80.0', '90.0', '100.0') AND timestamp > datetime('now', '-5 minutes')")
+        active_threats = cur.fetchone()[0]
+        
+        # Simulate base metrics with slight variance, weighted by active threats
+        # CPU jumps if there are active threats or high event rate
+        base_cpu = 15 + (active_threats * 10) + (events_last_min * 0.5)
+        cpu_usage = min(99, int(base_cpu + (hash(os.urandom(1)) % 5)))
+        
+        # Memory slowly climbs with events
+        memory_usage = min(95, int(40 + (active_threats * 5) + (events_last_min * 0.1)))
+        
+        # Queue size spikes during attacks
+        kafka_queue_size = int((events_last_min * 1.5) + (active_threats * 15))
+        
+        # Stability drops when under attack
+        system_stability = max(10, int(100 - (active_threats * 15) - (events_last_min * 0.2)))
+        
+        conn.close()
+        return jsonify({
+            'cpu_usage': cpu_usage,
+            'memory_usage': memory_usage,
+            'kafka_queue_size': kafka_queue_size,
+            'event_processing_rate': events_last_min,
+            'active_threats': active_threats,
+            'system_stability': system_stability
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/security-score', methods=['GET'])
+def get_security_score():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Security score is 100 minus the average risk score of the last 10 minutes
+        cur.execute('''
+            SELECT details FROM incident_logs 
+            WHERE agent_name='RiskAssessmentAgent' 
+            AND timestamp > datetime('now', '-10 minutes')
+        ''')
+        rows = cur.fetchall()
+        
+        total_risk = 0
+        count = 0
+        for row in rows:
+            try:
+                details = json.loads(row['details'])
+                total_risk += details.get('risk_score', 0)
+                count += 1
+            except: pass
+            
+        avg_risk = (total_risk / count) if count > 0 else 0
+        
+        # Base score 100, drops by average active risk.
+        security_score = max(0, min(100, int(100 - avg_risk)))
+        
+        conn.close()
+        return jsonify({'security_score': security_score})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/events', methods=['GET'])
+def get_raw_events():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # Fetch the 20 most recent logs for the scrolling stream
+        cur.execute('''
+            SELECT timestamp, agent_name, action_taken, details 
+            FROM incident_logs 
+            ORDER BY timestamp DESC LIMIT 20
+        ''')
+        rows = cur.fetchall()
+        
+        events = []
+        for row in reversed(rows): # Reverse so oldest is first in the stream box
+            time_str = row['timestamp'].split('T')[1].split('.')[0] # HH:MM:SS
+            agent = row['agent_name']
+            
+            # Formulate a brief summary string
+            msg = ""
+            if agent == "MonitoringAgent":
+                msg = "detected network anomaly"
+            elif agent == "ThreatIntelAgent":
+                try:
+                    d = json.loads(row['details'])
+                    msg = f"classified {d.get('attack_type', 'Suspicious Activity')}"
+                except: msg = "classified threat"
+            elif agent == "RiskAssessmentAgent":
+                try:
+                    d = json.loads(row['details'])
+                    msg = f"assigned risk score {d.get('risk_score', 0)}"
+                except: msg = "assigned risk score"
+            elif agent == "ResponseAgent":
+                msg = f"executed action: {row['action_taken']}"
+            else:
+                msg = "processed event payload"
+                
+            stream_str = f"[{time_str}] {agent} {msg}"
+            events.append(stream_str)
+            
+        conn.close()
+        return jsonify(events)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

@@ -11,7 +11,7 @@ const ThreatTable = ({ threats }) => {
     };
 
     return (
-        <div className="relative overflow-hidden bg-slate-900/40 backdrop-blur-md border border-slate-700/50 rounded-xl shadow-[0_4px_20px_rgba(0,0,0,0.4)] flex flex-col h-[400px]">
+        <div className="relative overflow-hidden bg-slate-900/40 backdrop-blur-md border border-slate-700/50 rounded-xl shadow-[0_4px_20px_rgba(0,0,0,0.4)] flex flex-col h-full min-h-[400px] max-h-[600px]">
             {/* Header */}
             <div className="p-4 border-b border-slate-700/50 flex justify-between items-center bg-slate-900/60">
                 <div className="flex items-center gap-2">

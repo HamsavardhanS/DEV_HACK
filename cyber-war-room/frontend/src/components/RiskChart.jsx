@@ -26,7 +26,9 @@ ChartJS.register(
 
 const RiskChart = ({ data: riskData }) => {
     // Transform incoming array of {time, score} to chart format
-    const labels = riskData?.length > 0 ? riskData.map(d => d.time) : ['--:--'];
+    const labels = riskData?.length > 0
+        ? riskData.map(d => new Date(d.time).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false }))
+        : ['--:--:--'];
     const scores = riskData?.length > 0 ? riskData.map(d => d.score) : [0];
 
     const data = {

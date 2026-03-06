@@ -87,24 +87,32 @@ def send_malware(producer):
 
 def run_simulation():
     producer = get_producer()
-    print("Connected to Kafka. Beginning test data simulation...")
+    print("Connected to Kafka. Beginning continuous test data simulation (every 5 minutes)...")
     
-    time.sleep(2)
-    send_normal_traffic(producer)
-    
-    time.sleep(5)
-    send_brute_force(producer)
-    
-    time.sleep(5)
-    send_ddos(producer)
-    
-    time.sleep(5)
-    send_malware(producer)
-    
-    print("Simulation complete. Waiting for producers to flush...")
-    producer.flush()
-    producer.close()
-    print("Exiting simulator.")
+    try:
+        while True:
+            print(f"\n[{get_timestamp()}] --- Starting new attack simulation cycle ---")
+            
+            send_normal_traffic(producer)
+            time.sleep(5)
+            
+            send_brute_force(producer)
+            time.sleep(5)
+            
+            send_ddos(producer)
+            time.sleep(5)
+            
+            send_malware(producer)
+            
+            producer.flush()
+            print(f"[{get_timestamp()}] --- Cycle complete. Waiting 5 minutes until next cycle... ---")
+            time.sleep(300)
+            
+    except KeyboardInterrupt:
+        print("\nSimulation aborted by user. Waiting for producers to flush...")
+        producer.flush()
+        producer.close()
+        print("Exiting simulator.")
 
 if __name__ == "__main__":
     run_simulation()
