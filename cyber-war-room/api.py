@@ -656,6 +656,49 @@ def export_report():
         response = jsonify(report)
         response.headers['Content-Disposition'] = 'attachment; filename=incident_report.json'
         return response
+
+def get_ai_analysis():
+    """Returns the latest AI incident analyses from the LLM SOC Analyst Agent."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Check if the table exists (it's created by the LLM agent)
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ai_incident_analysis'")
+        if not cur.fetchone():
+            conn.close()
+            return jsonify([])
+        
+        cur.execute('''
+            SELECT id, event_id, timestamp, attack_type, risk_score, 
+                   ai_analysis, recommendations, severity, source_ip
+            FROM ai_incident_analysis 
+            ORDER BY timestamp DESC LIMIT 50
+        ''')
+        rows = cur.fetchall()
+        
+        analyses = []
+        for row in rows:
+            # Parse recommendations from JSON string
+            try:
+                recs = json.loads(row['recommendations']) if row['recommendations'] else []
+            except (json.JSONDecodeError, TypeError):
+                recs = []
+            
+            analyses.append({
+                'id': row['id'],
+                'eventId': row['event_id'],
+                'timestamp': row['timestamp'],
+                'attackType': row['attack_type'],
+                'riskScore': row['risk_score'],
+                'aiAnalysis': row['ai_analysis'],
+                'recommendations': recs,
+                'severity': row['severity'],
+                'sourceIp': row['source_ip']
+            })
+        
+        conn.close()
+        return jsonify(analyses)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

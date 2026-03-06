@@ -14,6 +14,7 @@ import LiveEventStream from '../components/LiveEventStream';
 import DetailModal from '../components/DetailModal';
 import ToastContainer from '../components/ToastContainer';
 import GeoAttackMap from '../components/GeoAttackMap';
+import AIAnalysisPanel from '../components/AIAnalysisPanel';
 import {
     fetchStats, fetchThreats, fetchLogs, fetchAgents,
     fetchDistribution, fetchRiskTrend, clearLogs,
@@ -31,6 +32,7 @@ const Dashboard = () => {
     const [health, setHealth] = useState(null);
     const [securityScore, setSecurityScore] = useState(100);
     const [rawEvents, setRawEvents] = useState([]);
+    const [aiAnalysis, setAiAnalysis] = useState([]);
     const [loading, setLoading] = useState(true);
     const [activeModal, setActiveModal] = useState(null);
 
@@ -53,7 +55,7 @@ const Dashboard = () => {
         try {
             const [
                 statsData, threatsData, logsData, agentsData, distData, trendData,
-                healthData, eventsData
+                healthData, scoreData, eventsData, aiData
             ] = await Promise.all([
                 fetchStats(),
                 fetchThreats(),
@@ -62,7 +64,9 @@ const Dashboard = () => {
                 fetchDistribution(),
                 fetchRiskTrend(),
                 fetchSystemHealth(),
-                fetchRawEvents()
+                fetchSecurityScore(),
+                fetchRawEvents(),
+                fetchAIAnalysis()
             ]);
             setStats(statsData);
             if (threatsData) {
@@ -75,6 +79,7 @@ const Dashboard = () => {
             setRiskTrend(trendData);
             setHealth(healthData);
             if (eventsData) setRawEvents(eventsData);
+            if (aiData) setAiAnalysis(aiData);
         } catch (error) {
             console.error("Failed to load dashboard data", error);
         } finally {
@@ -244,8 +249,10 @@ const Dashboard = () => {
                         <LiveEventStream rawEvents={rawEvents} />
                     </div>
                 </div>
-
-                {/* 7. Incident Reports / Forensics */}
+                {/* 6. AI Threat Analysis */}
+                <div className="w-full">
+                    <AIAnalysisPanel analyses={aiAnalysis} />
+                </div>
                 <div className="w-full mb-12 pt-4">
                     <LogsPanel logs={logs} />
                 </div>

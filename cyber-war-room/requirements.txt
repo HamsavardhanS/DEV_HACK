@@ -1,2 +1,6 @@
 kafka-python
 pytest
+groq
+flask
+flask-cors
+psutil
